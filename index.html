@@ -134,7 +134,7 @@ header {
   text-overflow:ellipsis;
 }
 
-/* ── OBJECT LIST (minimal, voice-forward) ── */
+/* ── OBJECT LIST ── */
 #obj-list {
   flex:1; padding:10px 12px;
   display:flex; flex-direction:column; gap:7px;
@@ -203,7 +203,6 @@ header {
   border-radius:20px; display:none;
 }
 .p-c { background:#0d2a1a; color:var(--green); border:1px solid #00ff8833; }
-.p-a { background:#1a1a3a; color:#7c83fd;      border:1px solid #7c83fd33; }
 .p-f { background:#2a0d0d; color:var(--red);   border:1px solid #ff2d5533; }
 
 /* ── BUTTONS ── */
@@ -327,10 +326,8 @@ header {
 <div id="countdown"></div>
 
 <script>
-// ── CONFIG ──
-const CUSTOM_API  = 'https://image-to-text-0918.onrender.com/api/image/image-api';
-const CUSTOM_BASE = 'https://image-to-text-0918.onrender.com';
-
+// ── CONFIG (Yahan Apni Nayi API Dalein) ──
+const CUSTOM_API = 'AIzaSyAzDagAAQPZtn14bPcJ_fV_nIs8YvuJNmI'; 
 
 // ── STATE ──
 let camStream = null;
@@ -360,7 +357,6 @@ async function startCam() {
     document.getElementById('hud-l').textContent = 'CAM: ON';
     setS('✅','Camera ready! Live Scan dabao.');
     speakTTS('Camera ready. Live Scan button dabao.');
-    pingServer();
   } catch(e) {
     setS('❌','Camera error: '+e.message);
     speakTTS('Camera error. Permission do aur dobara try karo.');
@@ -404,7 +400,7 @@ async function runScan() {
   liveTimer = setTimeout(runScan, delay);
 }
 
-// ── CAPTURE & ANALYZE ──
+// ── CAPTURE & ANALYZE (New API Integration) ──
 async function captureAndAnalyze() {
   if (busy) return;
   const video = document.getElementById('video');
@@ -418,39 +414,82 @@ async function captureAndAnalyze() {
   const dataURL = canvas.toDataURL('image/jpeg', 0.72);
   const b64     = dataURL.split(',')[1];
 
-  setS('📡','Analyzing...');
+  setS('📡','Analyzing image via API...');
 
-  let result = ''; let api = '';
+  let result = ''; 
+  let apiStatus = '';
+  
   try {
+    // API Call
     result = await callCustomAPI(dataURL, b64);
-    api = 'custom';
+    apiStatus = 'custom';
   } catch(e) {
-    api = 'fail';
-    console.error('API Error:', e);
-    setS('❌', 'Error: ' + e.message);
+    console.error("API Error: ", e);
+    apiStatus = 'fail';
   }
 
   if (result) {
     lastRaw = result;
     scanCount++;
     document.getElementById('scan-count').textContent = 'SCANS: ' + scanCount;
-    showPill(api);
+    showPill(apiStatus);
 
     const objs = parseObjects(result);
     lastObjs   = objs;
 
     renderList(objs);
 
-    // Build speech and SPEAK IT
     const speech = buildSpeech(objs, result);
     setS('🔊', speech.substring(0, 100));
     if (!muted) speakWithHighlight(objs, speech);
 
-  } else if (api !== 'fail') {
-    setS('⚠️','Response nahi aaya. Retry...');
+  } else {
+    setS('⚠️','API se response nahi aaya. Data check karein.');
     if (!muted) speakTTS('Response nahi aaya. Dobara try kar raha hoon.');
   }
   busy = false;
+}
+
+// ── API HELPER FUNCTIONS ──
+async function callCustomAPI(dataURL, b64) {
+  // Agar API JSON expect karti hai toh FormData ko modify kar lena
+  const blob = dataURLtoBlob(dataURL);
+  const fd   = new FormData();
+  fd.append('image', blob, 'photo.jpg');
+  fd.append('file',  blob, 'photo.jpg');
+  
+  const r = await fetchT(CUSTOM_API, { method:'POST', body:fd }, 8000); // 8 seconds timeout
+  if (r.ok) {
+    const t = await parseResp(r);
+    if (t && t.length > 3) return t;
+  }
+  throw new Error('API fail ho gayi');
+}
+
+async function parseResp(r) {
+  const raw = await r.text();
+  try {
+    const o = JSON.parse(raw);
+    for (const k of ['text','result','description','label','output','message','data','content','response','caption','detected']) {
+      if (o[k]) {
+        if (typeof o[k]==='string') return o[k];
+        if (Array.isArray(o[k]))    return o[k].join(', ');
+        return JSON.stringify(o[k]);
+      }
+    }
+    return raw;
+  } catch(_) { return raw; } // If not JSON, return plain text
+}
+
+function dataURLtoBlob(d) {
+  const [h,data] = d.split(','), mime = h.match(/:(.*?);/)[1], bin = atob(data), arr = new Uint8Array(bin.length);
+  for(let i=0; i<bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr],{type:mime});
+}
+
+function fetchT(url, opts, ms) {
+  const c = new AbortController(), t = setTimeout(()=>c.abort(), ms);
+  return fetch(url, {...opts, signal:c.signal}).finally(()=>clearTimeout(t));
 }
 
 // ── PARSE OBJECTS ──
@@ -503,7 +542,6 @@ function parseObjects(text) {
     }
   }
 
-  // Fallback — grab capitalized nouns
   if (!objs.length) {
     const skip = new Set(['The','This','There','Here','Image','Photo','Scene','These','That','They','With','From','Also','Some','Like','Can','Been','Have','Shows','Contains','Area','View','Background','Foreground']);
     const dist  = estimateDist(text.toLowerCase());
@@ -536,20 +574,14 @@ function distHindi(d) {
   return ['bilkul paas — आधे meter se bhi kam','ek meter ke aas paas','lagbhag do meter door','teen meter ya zyada door'][d] ?? 'nazdeek';
 }
 
-// ── BUILD SPEECH ──
 function buildSpeech(objs, raw) {
   if (!objs.length) {
-    // Just speak the raw result
     return raw.replace(/[*_#]/g,'').trim();
   }
-  // Speak each object with distance
-  const parts = objs.map(o =>
-    `${o.name} — ${distHindi(o.dist)}`
-  );
+  const parts = objs.map(o => `${o.name} — ${distHindi(o.dist)}`);
   return parts.join('. ');
 }
 
-// ── RENDER LIST ──
 function renderList(objs) {
   const wrap = document.getElementById('obj-list');
   if (!objs.length) {
@@ -568,8 +600,6 @@ function renderList(objs) {
   `).join('');
 }
 
-// ── SPEAK WITH ROW HIGHLIGHT ──
-// Android fix: ek single utterance mein saari speech, highlight setTimeout se
 function speakWithHighlight(objs, fullSpeech) {
   if (!window.speechSynthesis) return;
 
@@ -579,15 +609,13 @@ function speakWithHighlight(objs, fullSpeech) {
       return;
     }
 
-    // Highlight each row based on estimated timing
     setSpeaking(true, objs[0].name + ' · ' + objs[0].distLabel);
     let elapsed = 0;
     objs.forEach((o, i) => {
       const wordsInChunk = (`${o.name} ${distHindi(o.dist)}`).split(' ').length;
       const delay = elapsed;
-      elapsed += Math.max(700, wordsInChunk * 350); // ~350ms per word
+      elapsed += Math.max(700, wordsInChunk * 350); 
       setTimeout(() => {
-        // un-highlight prev
         if (i > 0) {
           const prev = document.getElementById('row-'+(i-1));
           const pb   = document.getElementById('badge-'+(i-1));
@@ -602,7 +630,6 @@ function speakWithHighlight(objs, fullSpeech) {
       }, delay);
     });
 
-    // Final: un-highlight last after all done
     setTimeout(() => {
       const last = document.getElementById('row-'+(objs.length-1));
       const lb   = document.getElementById('badge-'+(objs.length-1));
@@ -611,7 +638,6 @@ function speakWithHighlight(objs, fullSpeech) {
       setSpeaking(false,'');
     }, elapsed + 500);
 
-    // Speak full text as ONE utterance (Android friendly)
     _speak(fullSpeech, ()=>{
       setSpeaking(false,'');
     });
@@ -626,10 +652,8 @@ function speakTTS(text) {
   });
 }
 
-// Core speak — single utterance, no chunking (Android stable)
 function _speak(text, onDone) {
   if (!text || !window.speechSynthesis) { onDone && onDone(); return; }
-  // Android: max ~4000 chars per utterance
   const MAX = 3800;
   const parts = [];
   let t = text.trim();
@@ -646,7 +670,7 @@ function _speak(text, onDone) {
     if (idx >= parts.length) { onDone && onDone(); return; }
     const u = new SpeechSynthesisUtterance(parts[idx++]);
     applyVoiceSettings(u);
-    u.onend   = () => setTimeout(next, 100); // small gap between parts
+    u.onend   = () => setTimeout(next, 100); 
     u.onerror = (e) => {
       console.warn('TTS error:', e.error);
       setTimeout(next, 200);
@@ -656,11 +680,10 @@ function _speak(text, onDone) {
   next();
 }
 
-// Cancel safely — Android needs a delay before new speak
 function cancelTTS(callback) {
   if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
     window.speechSynthesis.cancel();
-    setTimeout(callback, 250); // wait for Android to reset
+    setTimeout(callback, 250); 
   } else {
     callback();
   }
@@ -672,8 +695,6 @@ function applyVoiceSettings(u) {
   u.pitch  = 1;
   u.volume = 1;
 }
-
-
 
 function setSpeaking(on, label) {
   speaking = on;
@@ -697,53 +718,6 @@ function toggleMute() {
   if (!muted) speakTTS('Awaaz on kar di.');
 }
 
-// ── API CALLS ──
-async function callCustomAPI(dataURL, b64) {
-  const blob = dataURLtoBlob(dataURL);
-  const fd   = new FormData();
-  fd.append('image', blob, 'photo.jpg');
-  fd.append('file',  blob, 'photo.jpg');
-  const r = await fetchT(CUSTOM_API, { method:'POST', body:fd }, 8000);
-  if (r.ok) {
-    const t = await parseResp(r);
-    if (t && t.length > 5) return t;
-  }
-  throw new Error('Custom fail');
-}
-
-
-
-async function parseResp(r) {
-  const raw = await r.text();
-  try {
-    const o = JSON.parse(raw);
-    for (const k of ['text','result','description','label','output','message','data','content','response','caption','detected']) {
-      if (o[k]) {
-        if (typeof o[k]==='string') return o[k];
-        if (Array.isArray(o[k]))    return o[k].join(', ');
-        return JSON.stringify(o[k]);
-      }
-    }
-    return raw;
-  } catch(_) { return raw; }
-}
-
-function dataURLtoBlob(d) {
-  const [h,data]=d.split(','),mime=h.match(/:(.*?);/)[1],bin=atob(data),arr=new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
-  return new Blob([arr],{type:mime});
-}
-
-function fetchT(url, opts, ms) {
-  const c=new AbortController(), t=setTimeout(()=>c.abort(),ms);
-  return fetch(url,{...opts,signal:c.signal}).finally(()=>clearTimeout(t));
-}
-
-async function pingServer() {
-  try { await fetch(CUSTOM_BASE,{method:'GET',signal:AbortSignal.timeout(6000)}); } catch(_){}
-}
-
-// ── COUNTDOWN ──
 function startCountdown(ms) {
   clearInterval(cdTimer);
   let left = Math.ceil(ms/1000);
@@ -755,7 +729,6 @@ function startCountdown(ms) {
   },1000);
 }
 
-// ── UI HELPERS ──
 function setS(icon,msg) {
   document.getElementById('s-icon').textContent=icon;
   document.getElementById('s-msg').textContent=msg;
@@ -764,16 +737,14 @@ function setS(icon,msg) {
 function showPill(t) {
   const el=document.getElementById('s-pill');
   el.style.display='inline-block';
-  if(t==='custom'){el.className='p-c';el.textContent='ORIG';}
+  if(t==='custom'){el.className='p-c';el.textContent='API OK';}
   else{el.className='p-f';el.textContent='FAIL';}
 }
 
-// ── VOICES ──
 function loadVoices() {
   if (!window.speechSynthesis) return;
   const list = window.speechSynthesis.getVoices();
   if (!list.length) return;
-  // Prefer Hindi or English voices
   voiceList = list.sort((a,b)=>{
     const aH = a.lang.startsWith('hi') ? 0 : a.lang.startsWith('en') ? 1 : 2;
     const bH = b.lang.startsWith('hi') ? 0 : b.lang.startsWith('en') ? 1 : 2;
