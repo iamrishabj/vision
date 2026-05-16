@@ -426,6 +426,8 @@ async function captureAndAnalyze() {
     api = 'custom';
   } catch(e) {
     api = 'fail';
+    console.error('API Error:', e);
+    setS('❌', 'Error: ' + e.message);
   }
 
   if (result) {
@@ -444,7 +446,7 @@ async function captureAndAnalyze() {
     setS('🔊', speech.substring(0, 100));
     if (!muted) speakWithHighlight(objs, speech);
 
-  } else {
+  } else if (api !== 'fail') {
     setS('⚠️','Response nahi aaya. Retry...');
     if (!muted) speakTTS('Response nahi aaya. Dobara try kar raha hoon.');
   }
