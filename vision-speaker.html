@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Vision Speaker</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@400;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --cyan:  #00e5ff;
+  --green: #00ff88;
+  --red:   #ff2d55;
+  --yellow:#ffd60a;
+  --bg:    #080c10;
+  --panel: #0d1117;
+  --bord:  #1a2332;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body {
+  background:var(--bg);
+  color:#e0e8f0;
+  font-family:'Exo 2',sans-serif;
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  overflow-x:hidden;
+}
+
+header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 16px;
+  border-bottom:1px solid var(--bord);
+  background:#0a0f16;
+  flex-shrink:0;
+}
+.logo {
+  font-family:'Share Tech Mono',monospace;
+  font-size:1.05rem;
+  color:var(--cyan);
+  letter-spacing:3px;
+}
+.logo span { color:var(--green); }
+#live-dot {
+  width:11px; height:11px; border-radius:50%;
+  background:#222; transition:all 0.3s;
+}
+#live-dot.on {
+  background:var(--red);
+  box-shadow:0 0 10px var(--red);
+  animation:blink 1s infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.25} }
+
+/* ── CAMERA ── */
+.cam-wrap {
+  position:relative; width:100%;
+  background:#000; overflow:hidden; flex-shrink:0;
+}
+#video {
+  width:100%; max-height:54vw; min-height:190px;
+  object-fit:cover; display:block;
+}
+#scan-line {
+  position:absolute; left:0; right:0; height:2px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+  top:0; display:none;
+  animation:sweep 1.4s linear infinite;
+}
+@keyframes sweep {
+  0%  { top:0%;   opacity:1; }
+  90% { top:100%; opacity:1; }
+  100%{ top:100%; opacity:0; }
+}
+/* corner brackets */
+.cam-wrap::before,.cam-wrap::after,
+.cam-b::before,.cam-b::after {
+  content:''; position:absolute;
+  width:22px; height:22px;
+  border-color:var(--cyan); border-style:solid;
+  z-index:2; opacity:0.55;
+}
+.cam-wrap::before { top:8px; left:8px;   border-width:2px 0 0 2px; }
+.cam-wrap::after  { top:8px; right:8px;  border-width:2px 2px 0 0; }
+.cam-b::before    { bottom:8px; left:8px;  border-width:0 0 2px 2px; }
+.cam-b::after     { bottom:8px; right:8px; border-width:0 2px 2px 0; }
+#hud {
+  position:absolute; bottom:0; left:0; right:0;
+  padding:6px 12px;
+  background:linear-gradient(transparent,rgba(8,12,16,.92));
+  font-family:'Share Tech Mono',monospace;
+  font-size:0.68rem; color:var(--cyan);
+  display:flex; justify-content:space-between; z-index:3;
+}
+#canvas { display:none; }
+
+/* ── SPEAKING VISUALIZER ── */
+#speak-bar {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 14px;
+  background:var(--panel);
+  border-bottom:1px solid var(--bord);
+  flex-shrink:0;
+}
+.bars {
+  display:flex; align-items:center; gap:3px;
+  height:28px;
+}
+.bar {
+  width:4px; border-radius:3px;
+  background:var(--cyan);
+  height:6px;
+  transition:height 0.1s;
+}
+.bar.active {
+  animation:wave 0.6s ease-in-out infinite;
+}
+.bar:nth-child(2){animation-delay:0.1s}
+.bar:nth-child(3){animation-delay:0.2s}
+.bar:nth-child(4){animation-delay:0.3s}
+.bar:nth-child(5){animation-delay:0.15s}
+@keyframes wave {
+  0%,100%{ height:4px; }
+  50%    { height:22px; }
+}
+#speak-label {
+  font-family:'Share Tech Mono',monospace;
+  font-size:0.72rem; color:var(--cyan);
+  letter-spacing:1px; flex:1;
+}
+#speak-text {
+  font-size:0.78rem; color:#8899aa;
+  font-style:italic; max-width:58%;
+  white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* ── OBJECT LIST (minimal, voice-forward) ── */
+#obj-list {
+  flex:1; padding:10px 12px;
+  display:flex; flex-direction:column; gap:7px;
+  overflow-y:auto;
+}
+.obj-row {
+  display:flex; align-items:center; gap:10px;
+  background:var(--panel);
+  border:1px solid var(--bord);
+  border-radius:10px;
+  padding:10px 14px;
+  animation:fadeIn 0.25s ease;
+}
+@keyframes fadeIn {
+  from{opacity:0;transform:translateY(6px)}
+  to  {opacity:1;transform:translateY(0)}
+}
+.obj-row .icon { font-size:1.4rem; flex-shrink:0; }
+.obj-row .info { flex:1; }
+.obj-row .name {
+  font-weight:700; font-size:0.9rem; color:#e0e8f0;
+}
+.obj-row .dist {
+  font-family:'Share Tech Mono',monospace;
+  font-size:0.72rem; margin-top:1px;
+}
+.dist-c { color:var(--red); }
+.dist-n { color:var(--yellow); }
+.dist-m { color:var(--green); }
+.dist-f { color:#5577aa; }
+.obj-row .spoken-badge {
+  font-family:'Share Tech Mono',monospace;
+  font-size:0.58rem; color:#334455;
+  letter-spacing:1px;
+}
+.obj-row.speaking {
+  border-color:var(--cyan);
+  box-shadow:0 0 8px rgba(0,229,255,0.15);
+}
+.obj-row.speaking .spoken-badge { color:var(--cyan); }
+
+#empty-msg {
+  color:#334455;
+  font-family:'Share Tech Mono',monospace;
+  font-size:0.75rem;
+  text-align:center;
+  padding:24px 0;
+  letter-spacing:1px;
+}
+
+/* ── STATUS ── */
+#status-bar {
+  padding:9px 14px;
+  background:var(--panel);
+  border-top:1px solid var(--bord);
+  border-bottom:1px solid var(--bord);
+  font-size:0.8rem; color:#8899aa;
+  display:flex; align-items:center; gap:8px;
+  flex-shrink:0;
+}
+#s-icon { font-size:0.95rem; }
+#s-msg  { flex:1; }
+#s-pill {
+  font-family:'Share Tech Mono',monospace;
+  font-size:0.58rem; padding:2px 7px;
+  border-radius:20px; display:none;
+}
+.p-c { background:#0d2a1a; color:var(--green); border:1px solid #00ff8833; }
+.p-a { background:#1a1a3a; color:#7c83fd;      border:1px solid #7c83fd33; }
+.p-f { background:#2a0d0d; color:var(--red);   border:1px solid #ff2d5533; }
+
+/* ── BUTTONS ── */
+.btns {
+  display:grid; grid-template-columns:1fr 1fr;
+  gap:8px; padding:10px 12px;
+  flex-shrink:0;
+}
+.btn {
+  padding:14px 8px; border:none; border-radius:10px;
+  font-family:'Exo 2',sans-serif;
+  font-size:0.88rem; font-weight:700;
+  cursor:pointer; letter-spacing:0.5px;
+  display:flex; align-items:center;
+  justify-content:center; gap:6px;
+  transition:all 0.15s;
+}
+.btn:active  { transform:scale(0.96); }
+.btn:disabled{ opacity:0.3; cursor:not-allowed; }
+.b-cam   { background:#00b4d8; color:#000; grid-column:1/-1; }
+.b-live  { background:var(--green); color:#000; }
+.b-pause { background:var(--red);   color:#fff; }
+.b-again { background:#1a2332; color:var(--cyan); border:1px solid var(--bord); }
+.b-mute  { background:#1a2332; color:#8899aa;    border:1px solid var(--bord); }
+
+/* ── SPEED ROW ── */
+.speed-row {
+  display:flex; align-items:center; gap:8px;
+  padding:8px 12px;
+  border-top:1px solid var(--bord);
+  flex-shrink:0;
+}
+.speed-row label {
+  font-size:0.72rem; color:#556677;
+  font-family:'Share Tech Mono',monospace;
+}
+.speed-row select {
+  flex:1; background:#0d1117; color:#e0e8f0;
+  border:1px solid var(--bord);
+  padding:6px 10px; border-radius:7px;
+  font-size:0.78rem;
+  font-family:'Share Tech Mono',monospace;
+}
+.speed-row select:focus { outline:none; border-color:var(--cyan); }
+
+#countdown {
+  text-align:center;
+  font-family:'Share Tech Mono',monospace;
+  font-size:1.4rem; color:var(--green);
+  display:none; padding:4px 0; letter-spacing:4px;
+  flex-shrink:0;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">👁 VISION<span>SPEAK</span></div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span style="font-size:0.6rem;color:#445566;font-family:'Share Tech Mono',monospace" id="scan-count">SCANS: 0</span>
+    <div id="live-dot"></div>
+  </div>
+</header>
+
+<div class="cam-wrap">
+  <div class="cam-b"></div>
+  <video id="video" autoplay playsinline muted></video>
+  <div id="scan-line"></div>
+  <canvas id="canvas"></canvas>
+  <div id="hud">
+    <span id="hud-l">CAM: OFF</span>
+    <span id="hud-r">READY</span>
+  </div>
+</div>
+
+<!-- SPEAKING VISUALIZER -->
+<div id="speak-bar">
+  <div class="bars" id="bars">
+    <div class="bar" id="b1"></div>
+    <div class="bar" id="b2"></div>
+    <div class="bar" id="b3"></div>
+    <div class="bar" id="b4"></div>
+    <div class="bar" id="b5"></div>
+  </div>
+  <span id="speak-label">READY</span>
+  <span id="speak-text"></span>
+</div>
+
+<!-- OBJECT LIST -->
+<div id="obj-list">
+  <div id="empty-msg">WAITING FOR SCAN...</div>
+</div>
+
+<!-- STATUS -->
+<div id="status-bar">
+  <span id="s-icon">📷</span>
+  <span id="s-msg">Camera band hai. Start dabao.</span>
+  <span id="s-pill"></span>
+</div>
+
+<!-- BUTTONS -->
+<div class="btns">
+  <button class="btn b-cam"   id="btnCam"   onclick="startCam()">📷 Start Camera</button>
+  <button class="btn b-live"  id="btnLive"  onclick="startLive()"  disabled>▶ Live Scan</button>
+  <button class="btn b-pause" id="btnPause" onclick="pauseLive()"  disabled>⏸ Pause</button>
+  <button class="btn b-again" id="btnAgain" onclick="speakAgain()" disabled>🔊 Phir Bolo</button>
+  <button class="btn b-mute"  id="btnMute"  onclick="toggleMute()">🔔 Awaaz: ON</button>
+</div>
+
+<!-- SPEED -->
+<div class="speed-row">
+  <label>⚡ SPEED</label>
+  <select id="speedSel">
+    <option value="1500">Bahut Fast (1.5s)</option>
+    <option value="2500" selected>Fast (2.5s)</option>
+    <option value="4000">Normal (4s)</option>
+    <option value="6000">Slow (6s)</option>
+  </select>
+</div>
+
+<div id="countdown"></div>
+
+<script>
+// ── CONFIG ──
+const CUSTOM_API  = 'https://image-to-text-0918.onrender.com/api/image/image-api';
+const CUSTOM_BASE = 'https://image-to-text-0918.onrender.com';
+
+
+// ── STATE ──
+let camStream = null;
+let liveTimer = null;
+let cdTimer   = null;
+let voiceList = [];
+let busy      = false;
+let muted     = false;
+let scanning  = false;
+let scanCount = 0;
+let lastObjs  = [];
+let lastRaw   = '';
+let speaking  = false;
+
+// ── CAMERA ──
+async function startCam() {
+  setS('⏳','Camera shuru ho rahi hai...');
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1280 } },
+      audio:false
+    });
+    document.getElementById('video').srcObject = camStream;
+    document.getElementById('btnCam').disabled  = true;
+    document.getElementById('btnCam').textContent = '✅ Camera On';
+    document.getElementById('btnLive').disabled = false;
+    document.getElementById('hud-l').textContent = 'CAM: ON';
+    setS('✅','Camera ready! Live Scan dabao.');
+    speakTTS('Camera ready. Live Scan button dabao.');
+    pingServer();
+  } catch(e) {
+    setS('❌','Camera error: '+e.message);
+    speakTTS('Camera error. Permission do aur dobara try karo.');
+  }
+}
+
+// ── LIVE SCAN ──
+function startLive() {
+  if (!camStream) return;
+  scanning = true;
+  document.getElementById('btnLive').disabled  = true;
+  document.getElementById('btnPause').disabled = false;
+  document.getElementById('btnAgain').disabled = false;
+  document.getElementById('live-dot').classList.add('on');
+  document.getElementById('scan-line').style.display = 'block';
+  document.getElementById('hud-r').textContent = 'SCANNING';
+  speakTTS('Live scan shuru. Main har cheez bolonga.');
+  runScan();
+}
+
+function pauseLive() {
+  scanning = false;
+  clearTimeout(liveTimer);
+  clearInterval(cdTimer);
+  document.getElementById('btnLive').disabled  = false;
+  document.getElementById('btnPause').disabled = true;
+  document.getElementById('live-dot').classList.remove('on');
+  document.getElementById('scan-line').style.display = 'none';
+  document.getElementById('countdown').style.display = 'none';
+  document.getElementById('hud-r').textContent = 'PAUSED';
+  setS('⏸','Paused.');
+  speakTTS('Scan roka gaya.');
+}
+
+async function runScan() {
+  if (!scanning) return;
+  await captureAndAnalyze();
+  if (!scanning) return;
+  const delay = parseInt(document.getElementById('speedSel').value);
+  startCountdown(delay);
+  liveTimer = setTimeout(runScan, delay);
+}
+
+// ── CAPTURE & ANALYZE ──
+async function captureAndAnalyze() {
+  if (busy) return;
+  const video = document.getElementById('video');
+  if (!camStream || !video.videoWidth) return;
+  busy = true;
+
+  const canvas = document.getElementById('canvas');
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const dataURL = canvas.toDataURL('image/jpeg', 0.72);
+  const b64     = dataURL.split(',')[1];
+
+  setS('📡','Analyzing...');
+
+  let result = ''; let api = '';
+  try {
+    result = await callCustomAPI(dataURL, b64);
+    api = 'custom';
+  } catch(e) {
+    api = 'fail';
+  }
+
+  if (result) {
+    lastRaw = result;
+    scanCount++;
+    document.getElementById('scan-count').textContent = 'SCANS: ' + scanCount;
+    showPill(api);
+
+    const objs = parseObjects(result);
+    lastObjs   = objs;
+
+    renderList(objs);
+
+    // Build speech and SPEAK IT
+    const speech = buildSpeech(objs, result);
+    setS('🔊', speech.substring(0, 100));
+    if (!muted) speakWithHighlight(objs, speech);
+
+  } else {
+    setS('⚠️','Response nahi aaya. Retry...');
+    if (!muted) speakTTS('Response nahi aaya. Dobara try kar raha hoon.');
+  }
+  busy = false;
+}
+
+// ── PARSE OBJECTS ──
+const ICON_MAP = [
+  [['person','human','man','woman','boy','girl','people','child','baby','someone'],'🧑'],
+  [['chair','sofa','couch','bench','stool'],'🪑'],
+  [['table','desk','counter','surface'],'🪴'],
+  [['bed','mattress','pillow','cushion'],'🛏️'],
+  [['phone','mobile','smartphone','cellphone'],'📱'],
+  [['laptop','computer','monitor','screen','tv','television','display'],'💻'],
+  [['keyboard','mouse','trackpad'],'⌨️'],
+  [['car','vehicle','bus','truck','bike','motorcycle','scooter','cycle'],'🚗'],
+  [['bottle','cup','glass','mug','jar','can'],'🥤'],
+  [['food','fruit','vegetable','plate','bowl','dish'],'🍽️'],
+  [['book','notebook','paper','document','magazine'],'📚'],
+  [['pen','pencil','marker','eraser'],'✏️'],
+  [['bag','backpack','purse','wallet','suitcase'],'🎒'],
+  [['dog','cat','bird','animal','pet','fish'],'🐾'],
+  [['wall','floor','ceiling','door','window','room'],'🏠'],
+  [['shirt','clothes','shoe','hat','jacket','clothing','dress'],'👕'],
+  [['shelf','cabinet','cupboard','drawer','rack'],'🗄️'],
+  [['plant','flower','tree','leaf','pot'],'🌱'],
+  [['light','lamp','bulb','candle'],'💡'],
+  [['clock','watch'],'⏰'],
+  [['key','lock'],'🔑'],
+  [['remote','controller'],'📺'],
+  [['glasses','spectacles'],'👓'],
+  [['headphone','earphone','speaker'],'🎧'],
+];
+
+function parseObjects(text) {
+  const objs = [];
+  const sentences = text.replace(/[!?]/g,'.').split('.');
+
+  for (const sentence of sentences) {
+    const s = sentence.toLowerCase().trim();
+    if (!s) continue;
+    const dist = estimateDist(s);
+
+    for (const [keywords, icon] of ICON_MAP) {
+      for (const kw of keywords) {
+        if (s.includes(kw)) {
+          const name = kw.charAt(0).toUpperCase()+kw.slice(1);
+          if (!objs.find(o=>o.name.toLowerCase()===kw)) {
+            objs.push({ name, icon, dist, distLabel: distLabel(dist) });
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Fallback — grab capitalized nouns
+  if (!objs.length) {
+    const skip = new Set(['The','This','There','Here','Image','Photo','Scene','These','That','They','With','From','Also','Some','Like','Can','Been','Have','Shows','Contains','Area','View','Background','Foreground']);
+    const dist  = estimateDist(text.toLowerCase());
+    const words = text.match(/\b[A-Z][a-z]{2,}\b/g) || [];
+    for (const w of words) {
+      if (!skip.has(w) && !objs.find(o=>o.name===w) && objs.length<6) {
+        objs.push({ name:w, icon:'📦', dist, distLabel: distLabel(dist) });
+      }
+    }
+  }
+
+  return objs.slice(0,8);
+}
+
+function estimateDist(s) {
+  if (/very close|right in front|filling|immediate|foreground|touching|right here/.test(s)) return 0;
+  if (/\bclose\b|nearby|near |arm|directly|in front|prominent/.test(s))                     return 1;
+  if (/middle|center|few feet|meter|foot\b|feet\b|roughly/.test(s))                         return 2;
+  if (/background|distant|far |across|away|behind/.test(s))                                 return 3;
+  return 2;
+}
+
+function distLabel(d) {
+  return ['< 0.5m','~1m','~2m','3m+'][d] ?? '~1-2m';
+}
+function distClass(d) {
+  return ['dist-c','dist-n','dist-m','dist-f'][d] ?? 'dist-m';
+}
+function distHindi(d) {
+  return ['bilkul paas — आधे meter se bhi kam','ek meter ke aas paas','lagbhag do meter door','teen meter ya zyada door'][d] ?? 'nazdeek';
+}
+
+// ── BUILD SPEECH ──
+function buildSpeech(objs, raw) {
+  if (!objs.length) {
+    // Just speak the raw result
+    return raw.replace(/[*_#]/g,'').trim();
+  }
+  // Speak each object with distance
+  const parts = objs.map(o =>
+    `${o.name} — ${distHindi(o.dist)}`
+  );
+  return parts.join('. ');
+}
+
+// ── RENDER LIST ──
+function renderList(objs) {
+  const wrap = document.getElementById('obj-list');
+  if (!objs.length) {
+    wrap.innerHTML='<div id="empty-msg">Objects detect nahi hue...</div>';
+    return;
+  }
+  wrap.innerHTML = objs.map((o,i) => `
+    <div class="obj-row" id="row-${i}">
+      <span class="icon">${o.icon}</span>
+      <div class="info">
+        <div class="name">${o.name}</div>
+        <div class="dist ${distClass(o.dist)}">${o.distLabel} &nbsp;·&nbsp; ${distHindi(o.dist)}</div>
+      </div>
+      <span class="spoken-badge" id="badge-${i}">●</span>
+    </div>
+  `).join('');
+}
+
+// ── SPEAK WITH ROW HIGHLIGHT ──
+// Android fix: ek single utterance mein saari speech, highlight setTimeout se
+function speakWithHighlight(objs, fullSpeech) {
+  if (!window.speechSynthesis) return;
+
+  cancelTTS(() => {
+    if (!objs.length) {
+      _speak(fullSpeech, ()=>setSpeaking(false,''));
+      return;
+    }
+
+    // Highlight each row based on estimated timing
+    setSpeaking(true, objs[0].name + ' · ' + objs[0].distLabel);
+    let elapsed = 0;
+    objs.forEach((o, i) => {
+      const wordsInChunk = (`${o.name} ${distHindi(o.dist)}`).split(' ').length;
+      const delay = elapsed;
+      elapsed += Math.max(700, wordsInChunk * 350); // ~350ms per word
+      setTimeout(() => {
+        // un-highlight prev
+        if (i > 0) {
+          const prev = document.getElementById('row-'+(i-1));
+          const pb   = document.getElementById('badge-'+(i-1));
+          if (prev) prev.classList.remove('speaking');
+          if (pb)   pb.textContent = '✓';
+        }
+        const row = document.getElementById('row-'+i);
+        const bdg = document.getElementById('badge-'+i);
+        if (row) row.classList.add('speaking');
+        if (bdg) bdg.textContent = '🔊';
+        setSpeaking(true, o.name + ' · ' + o.distLabel);
+      }, delay);
+    });
+
+    // Final: un-highlight last after all done
+    setTimeout(() => {
+      const last = document.getElementById('row-'+(objs.length-1));
+      const lb   = document.getElementById('badge-'+(objs.length-1));
+      if (last) last.classList.remove('speaking');
+      if (lb)   lb.textContent = '✓';
+      setSpeaking(false,'');
+    }, elapsed + 500);
+
+    // Speak full text as ONE utterance (Android friendly)
+    _speak(fullSpeech, ()=>{
+      setSpeaking(false,'');
+    });
+  });
+}
+
+function speakTTS(text) {
+  if (!text || !window.speechSynthesis) return;
+  cancelTTS(() => {
+    setSpeaking(true, text.substring(0,40));
+    _speak(text, () => setSpeaking(false,''));
+  });
+}
+
+// Core speak — single utterance, no chunking (Android stable)
+function _speak(text, onDone) {
+  if (!text || !window.speechSynthesis) { onDone && onDone(); return; }
+  // Android: max ~4000 chars per utterance
+  const MAX = 3800;
+  const parts = [];
+  let t = text.trim();
+  while (t.length > MAX) {
+    let cut = t.lastIndexOf('. ', MAX);
+    if (cut < 0) cut = MAX;
+    parts.push(t.substring(0, cut+1).trim());
+    t = t.substring(cut+1).trim();
+  }
+  if (t) parts.push(t);
+
+  let idx = 0;
+  function next() {
+    if (idx >= parts.length) { onDone && onDone(); return; }
+    const u = new SpeechSynthesisUtterance(parts[idx++]);
+    applyVoiceSettings(u);
+    u.onend   = () => setTimeout(next, 100); // small gap between parts
+    u.onerror = (e) => {
+      console.warn('TTS error:', e.error);
+      setTimeout(next, 200);
+    };
+    window.speechSynthesis.speak(u);
+  }
+  next();
+}
+
+// Cancel safely — Android needs a delay before new speak
+function cancelTTS(callback) {
+  if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+    window.speechSynthesis.cancel();
+    setTimeout(callback, 250); // wait for Android to reset
+  } else {
+    callback();
+  }
+}
+
+function applyVoiceSettings(u) {
+  if (voiceList.length) u.voice = voiceList[0];
+  u.rate   = 1.0;
+  u.pitch  = 1;
+  u.volume = 1;
+}
+
+
+
+function setSpeaking(on, label) {
+  speaking = on;
+  const bars = document.querySelectorAll('.bar');
+  bars.forEach(b => {
+    if (on) b.classList.add('active');
+    else    b.classList.remove('active');
+  });
+  document.getElementById('speak-label').textContent = on ? 'SPEAKING' : 'READY';
+  document.getElementById('speak-text').textContent  = label || '';
+}
+
+function speakAgain() {
+  speakWithHighlight(lastObjs, buildSpeech(lastObjs, lastRaw));
+}
+
+function toggleMute() {
+  muted = !muted;
+  document.getElementById('btnMute').textContent = muted ? '🔇 Awaaz: OFF' : '🔔 Awaaz: ON';
+  document.getElementById('btnMute').style.color = muted ? '#556677' : 'var(--cyan)';
+  if (!muted) speakTTS('Awaaz on kar di.');
+}
+
+// ── API CALLS ──
+async function callCustomAPI(dataURL, b64) {
+  const blob = dataURLtoBlob(dataURL);
+  const fd   = new FormData();
+  fd.append('image', blob, 'photo.jpg');
+  fd.append('file',  blob, 'photo.jpg');
+  const r = await fetchT(CUSTOM_API, { method:'POST', body:fd }, 8000);
+  if (r.ok) {
+    const t = await parseResp(r);
+    if (t && t.length > 5) return t;
+  }
+  throw new Error('Custom fail');
+}
+
+
+
+async function parseResp(r) {
+  const raw = await r.text();
+  try {
+    const o = JSON.parse(raw);
+    for (const k of ['text','result','description','label','output','message','data','content','response','caption','detected']) {
+      if (o[k]) {
+        if (typeof o[k]==='string') return o[k];
+        if (Array.isArray(o[k]))    return o[k].join(', ');
+        return JSON.stringify(o[k]);
+      }
+    }
+    return raw;
+  } catch(_) { return raw; }
+}
+
+function dataURLtoBlob(d) {
+  const [h,data]=d.split(','),mime=h.match(/:(.*?);/)[1],bin=atob(data),arr=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  return new Blob([arr],{type:mime});
+}
+
+function fetchT(url, opts, ms) {
+  const c=new AbortController(), t=setTimeout(()=>c.abort(),ms);
+  return fetch(url,{...opts,signal:c.signal}).finally(()=>clearTimeout(t));
+}
+
+async function pingServer() {
+  try { await fetch(CUSTOM_BASE,{method:'GET',signal:AbortSignal.timeout(6000)}); } catch(_){}
+}
+
+// ── COUNTDOWN ──
+function startCountdown(ms) {
+  clearInterval(cdTimer);
+  let left = Math.ceil(ms/1000);
+  const el = document.getElementById('countdown');
+  el.style.display='block'; el.textContent=left+'s';
+  cdTimer = setInterval(()=>{
+    left--; el.textContent=left+'s';
+    if(left<=0){clearInterval(cdTimer);el.style.display='none';}
+  },1000);
+}
+
+// ── UI HELPERS ──
+function setS(icon,msg) {
+  document.getElementById('s-icon').textContent=icon;
+  document.getElementById('s-msg').textContent=msg;
+}
+
+function showPill(t) {
+  const el=document.getElementById('s-pill');
+  el.style.display='inline-block';
+  if(t==='custom'){el.className='p-c';el.textContent='ORIG';}
+  else{el.className='p-f';el.textContent='FAIL';}
+}
+
+// ── VOICES ──
+function loadVoices() {
+  if (!window.speechSynthesis) return;
+  const list = window.speechSynthesis.getVoices();
+  if (!list.length) return;
+  // Prefer Hindi or English voices
+  voiceList = list.sort((a,b)=>{
+    const aH = a.lang.startsWith('hi') ? 0 : a.lang.startsWith('en') ? 1 : 2;
+    const bH = b.lang.startsWith('hi') ? 0 : b.lang.startsWith('en') ? 1 : 2;
+    return aH - bH;
+  });
+}
+
+let pc=0;
+function pollV() { loadVoices(); if(!voiceList.length&&++pc<25) setTimeout(pollV,300); }
+if (window.speechSynthesis) { window.speechSynthesis.onvoiceschanged=loadVoices; pollV(); }
+</script>
+</body>
+</html>
